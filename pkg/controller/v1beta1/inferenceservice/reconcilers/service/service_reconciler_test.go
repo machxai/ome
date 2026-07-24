@@ -297,3 +297,69 @@ func TestBuildServiceWithEmptyAnnotations(t *testing.T) {
 		t.Errorf("Expected empty annotations, got %v", service.Annotations)
 	}
 }
+
+func TestBuildServiceHeadlessUnderPerPodDNS(t *testing.T) {
+	podSpec := &corev1.PodSpec{
+		Containers: []corev1.Container{{
+			Name: "test-container",
+			Ports: []corev1.ContainerPort{{
+				Name:          "http",
+				ContainerPort: 8080,
+			}},
+		}},
+	}
+
+	t.Run("headless when annotation is true", func(t *testing.T) {
+		componentMeta := metav1.ObjectMeta{
+			Name:      "test-engine",
+			Namespace: "default",
+			Annotations: map[string]string{
+				constants.PerPodDNS: "true",
+			},
+		}
+
+		service := buildService(componentMeta, podSpec, nil)
+
+		// ClusterIP=None makes this a headless Service for stable per-pod DNS
+		if service.Spec.ClusterIP != corev1.ClusterIPNone {
+			t.Errorf("Expected headless ClusterIP=%q, got %q", corev1.ClusterIPNone, service.Spec.ClusterIP)
+		}
+		// Selector and name are unchanged
+		expectedApp := constants.TruncateNameWithMaxLength(componentMeta.Name, 63)
+		if service.Spec.Selector["app"] != expectedApp {
+			t.Errorf("Expected selector app=%q, got %q", expectedApp, service.Spec.Selector["app"])
+		}
+		if service.Name != componentMeta.Name {
+			t.Errorf("Expected service name %q, got %q", componentMeta.Name, service.Name)
+		}
+	})
+
+	t.Run("non-headless when annotation absent", func(t *testing.T) {
+		componentMeta := metav1.ObjectMeta{
+			Name:      "test-engine",
+			Namespace: "default",
+		}
+
+		service := buildService(componentMeta, podSpec, nil)
+
+		if service.Spec.ClusterIP == corev1.ClusterIPNone {
+			t.Error("Expected non-headless Service when PerPodDNS annotation is absent")
+		}
+	})
+
+	t.Run("non-headless when annotation not true", func(t *testing.T) {
+		componentMeta := metav1.ObjectMeta{
+			Name:      "test-engine",
+			Namespace: "default",
+			Annotations: map[string]string{
+				constants.PerPodDNS: "false",
+			},
+		}
+
+		service := buildService(componentMeta, podSpec, nil)
+
+		if service.Spec.ClusterIP == corev1.ClusterIPNone {
+			t.Error("Expected non-headless Service when PerPodDNS annotation is not \"true\"")
+		}
+	})
+}

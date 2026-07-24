@@ -49,7 +49,13 @@ func (r *DeploymentReconciler) ReconcileRawDeployment(
 		return ctrl.Result{}, errors.Wrapf(err, "failed to reconcile %s", componentType)
 	}
 
-	r.StatusManager.PropagateRawStatus(&isvc.Status, componentType, deployment, reconciler.URL)
+	// In per-pod-DNS mode the reconciler renders a StatefulSet (and returns a nil Deployment),
+	// so propagate status from the StatefulSet instead.
+	if reconciler.StatefulSet != nil {
+		r.StatusManager.PropagateRawStatefulSetStatus(&isvc.Status, componentType, reconciler.StatefulSet.StatefulSet, reconciler.URL)
+	} else {
+		r.StatusManager.PropagateRawStatus(&isvc.Status, componentType, deployment, reconciler.URL)
+	}
 	return ctrl.Result{}, nil
 }
 
@@ -114,17 +120,41 @@ func (r *DeploymentReconciler) ReconcileMultiNodeRayVLLMDeployment(
 
 // setRawReferences sets the necessary references for raw deployment
 func (r *DeploymentReconciler) setRawReferences(isvc *v1beta1.InferenceService, reconciler *raw.RawKubeReconciler) error {
-	if err := controllerutil.SetControllerReference(isvc, reconciler.Deployment.Deployment, r.Scheme); err != nil {
-		return errors.Wrapf(err, "failed to set deployment owner reference")
+	// Per-pod-DNS mode: own the StatefulSet + Service (and the still-reconciled PDB). The
+	// Deployment and Scaler are not used in this mode, so their owner refs are skipped.
+	if reconciler.StatefulSet != nil {
+		if err := controllerutil.SetControllerReference(isvc, reconciler.StatefulSet.StatefulSet, r.Scheme); err != nil {
+			return errors.Wrapf(err, "failed to set statefulset owner reference")
+		}
+		if err := controllerutil.SetControllerReference(isvc, reconciler.Service.Service, r.Scheme); err != nil {
+			return errors.Wrapf(err, "failed to set service owner reference")
+		}
+		if reconciler.PodDisruptionBudget != nil {
+			if err := controllerutil.SetControllerReference(isvc, reconciler.PodDisruptionBudget.PDB, r.Scheme); err != nil {
+				return errors.Wrapf(err, "failed to set pdb owner reference")
+			}
+		}
+		return nil
+	}
+
+	if reconciler.Deployment != nil {
+		if err := controllerutil.SetControllerReference(isvc, reconciler.Deployment.Deployment, r.Scheme); err != nil {
+			return errors.Wrapf(err, "failed to set deployment owner reference")
+		}
 	}
 	if err := controllerutil.SetControllerReference(isvc, reconciler.Service.Service, r.Scheme); err != nil {
 		return errors.Wrapf(err, "failed to set service owner reference")
 	}
-	if err := controllerutil.SetControllerReference(isvc, reconciler.PodDisruptionBudget.PDB, r.Scheme); err != nil {
-		return errors.Wrapf(err, "failed to set pdb owner reference")
+	if reconciler.PodDisruptionBudget != nil {
+		if err := controllerutil.SetControllerReference(isvc, reconciler.PodDisruptionBudget.PDB, r.Scheme); err != nil {
+			return errors.Wrapf(err, "failed to set pdb owner reference")
+		}
 	}
 
-	return reconciler.Scaler.Autoscaler.SetControllerReferences(isvc, r.Scheme)
+	if reconciler.Scaler != nil {
+		return reconciler.Scaler.Autoscaler.SetControllerReferences(isvc, r.Scheme)
+	}
+	return nil
 }
 
 // setMultiNodeReferences sets the necessary references for multi-node deployment

@@ -112,7 +112,16 @@ func buildService(componentMeta metav1.ObjectMeta,
 		selector = map[string]string{"app": constants.TruncateNameWithMaxLength(serviceMeta.Name, 63)}
 	}
 
-	return buildServiceWithLoadBalancer(*serviceMeta, serviceType, servicePorts, selector)
+	service := buildServiceWithLoadBalancer(*serviceMeta, serviceType, servicePorts, selector)
+
+	// When per-pod-DNS mode is requested, render a headless Service (ClusterIP=None) so the
+	// StatefulSet gives each replica a stable per-pod DNS name. Read from the original
+	// componentMeta annotations, which are unaffected by the pod-only annotation filtering above.
+	if componentMeta.Annotations[constants.PerPodDNS] == "true" {
+		service.Spec.ClusterIP = corev1.ClusterIPNone
+	}
+
+	return service
 }
 
 // buildServicePorts creates service ports configuration from pod spec

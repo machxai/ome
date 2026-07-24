@@ -149,6 +149,9 @@ var (
 	RDMAProfileAnnotationKey                = "rdma.ome.io/profile"
 	RDMAContainerNameAnnotationKey          = "rdma.ome.io/container-name"
 	ModelCategoryAnnotation                 = "models.ome.io/category"
+	// PerPodDNS, when "true" on an engine component's annotations, makes the RawDeployment
+	// path render a StatefulSet + headless Service so each replica has a stable per-pod DNS.
+	PerPodDNS = "unified-router.machx.ai/per-pod-dns"
 
 	// Ingress Configuration Overrides
 	IngressDomainTemplate          = OMEAPIGroupName + "/ingress-domain-template"
