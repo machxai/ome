@@ -43,6 +43,45 @@ func (sr *StatusReconciler) PropagateRawStatus(
 	status.ObservedGeneration = deployment.Status.ObservedGeneration
 }
 
+// PropagateRawStatefulSetStatus propagates status from a raw Kubernetes StatefulSet.
+// It is used by the per-pod-DNS RawDeployment mode, where readiness is derived from the
+// StatefulSet's ReadyReplicas/Replicas rather than a Deployment "Available" condition.
+func (sr *StatusReconciler) PropagateRawStatefulSetStatus(
+	status *v1beta1.InferenceServiceStatus,
+	component v1beta1.ComponentType,
+	statefulSet *appsv1.StatefulSet,
+	url *apis.URL) {
+
+	if statefulSet == nil {
+		return
+	}
+
+	statusSpec := sr.initializeComponentStatus(status, component)
+
+	latestRevision := statefulSet.Status.UpdateRevision
+	statusSpec.LatestCreatedRevision = latestRevision
+
+	ready := sr.isStatefulSetReady(statefulSet)
+	if latestRevision != "" && ready {
+		statusSpec.LatestReadyRevision = latestRevision
+	}
+
+	readyCondition := sr.getReadyConditionsMap()[component]
+	condition := &apis.Condition{
+		Type:   readyCondition,
+		Status: v1.ConditionFalse,
+		Reason: "StatefulSetNotReady",
+	}
+	if ready {
+		condition.Status = v1.ConditionTrue
+		condition.Reason = "StatefulSetReady"
+		statusSpec.URL = url
+	}
+	sr.setCondition(status, readyCondition, condition)
+	status.Components[component] = statusSpec
+	status.ObservedGeneration = statefulSet.Status.ObservedGeneration
+}
+
 // PropagateMultiNodeStatus propagates status from LeaderWorkerSet
 func (sr *StatusReconciler) PropagateMultiNodeStatus(
 	status *v1beta1.InferenceServiceStatus,

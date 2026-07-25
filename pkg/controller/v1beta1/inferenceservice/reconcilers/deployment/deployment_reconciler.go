@@ -50,7 +50,7 @@ func createRawDeployment(componentMeta metav1.ObjectMeta,
 	podMetadata := componentMeta
 	podMetadata.Labels["app"] = constants.TruncateNameWithMaxLength(componentMeta.Name, 63)
 	utils.SetPodLabelsFromAnnotations(&podMetadata)
-	setDefaultPodSpec(podSpec)
+	SetDefaultPodSpec(podSpec)
 
 	deployment := &appsv1.Deployment{
 		ObjectMeta: componentMeta,
@@ -114,7 +114,9 @@ func (r *DeploymentReconciler) checkDeploymentExist() (constants.CheckResultType
 	return constants.CheckResultExisted, existingDeployment, nil
 }
 
-func setDefaultPodSpec(podSpec *corev1.PodSpec) {
+// SetDefaultPodSpec applies default pod-spec settings shared by the RawDeployment
+// (Deployment) and per-pod-DNS (StatefulSet) render paths.
+func SetDefaultPodSpec(podSpec *corev1.PodSpec) {
 	if podSpec.DNSPolicy == "" {
 		podSpec.DNSPolicy = corev1.DNSClusterFirst
 	}

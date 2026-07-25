@@ -125,7 +125,7 @@ func TestSetDefaultPodSpec(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			setDefaultPodSpec(tt.podSpec)
+			SetDefaultPodSpec(tt.podSpec)
 			assert.Equal(t, tt.expected.DNSPolicy, tt.podSpec.DNSPolicy)
 			assert.Equal(t, tt.expected.RestartPolicy, tt.podSpec.RestartPolicy)
 			assert.Equal(t, tt.expected.TerminationGracePeriodSeconds, tt.podSpec.TerminationGracePeriodSeconds)

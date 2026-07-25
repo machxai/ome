@@ -10,12 +10,14 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"sigs.k8s.io/ome/pkg/apis/ome/v1beta1"
+	"sigs.k8s.io/ome/pkg/constants"
 	"sigs.k8s.io/ome/pkg/controller/v1beta1/controllerconfig"
 	"sigs.k8s.io/ome/pkg/controller/v1beta1/inferenceservice/reconcilers/autoscaler"
 	"sigs.k8s.io/ome/pkg/controller/v1beta1/inferenceservice/reconcilers/deployment"
 	"sigs.k8s.io/ome/pkg/controller/v1beta1/inferenceservice/reconcilers/ingress/services"
 	"sigs.k8s.io/ome/pkg/controller/v1beta1/inferenceservice/reconcilers/pdb"
 	"sigs.k8s.io/ome/pkg/controller/v1beta1/inferenceservice/reconcilers/service"
+	"sigs.k8s.io/ome/pkg/controller/v1beta1/inferenceservice/reconcilers/statefulset"
 )
 
 // RawKubeReconciler reconciles the Native K8S Resources
@@ -23,6 +25,7 @@ type RawKubeReconciler struct {
 	client              client.Client
 	scheme              *runtime.Scheme
 	Deployment          *deployment.DeploymentReconciler
+	StatefulSet         *statefulset.StatefulSetReconciler
 	Service             *service.ServiceReconciler
 	Scaler              *autoscaler.AutoscalerReconciler
 	PodDisruptionBudget *pdb.PDBReconciler
@@ -49,15 +52,28 @@ func NewRawKubeReconciler(client client.Client,
 		return nil, err
 	}
 
-	return &RawKubeReconciler{
+	// When per-pod-DNS mode is requested on an engine component, render a StatefulSet +
+	// headless Service (the Service reconciler auto-detects the headless mode via the same
+	// annotation) instead of a Deployment + ClusterIP Service so each replica gets a stable
+	// per-pod DNS name. In this mode replicas are fixed, so no HPA/Scaler is used.
+	perPodDNS := componentMeta.Annotations[constants.PerPodDNS] == "true"
+
+	r := &RawKubeReconciler{
 		client:              client,
 		scheme:              scheme,
-		Deployment:          deployment.NewDeploymentReconciler(client, scheme, componentMeta, componentExt, podSpec),
 		Service:             service.NewServiceReconciler(client, scheme, componentMeta, componentExt, podSpec, nil),
 		Scaler:              as,
 		PodDisruptionBudget: pdb,
 		URL:                 url,
-	}, nil
+	}
+
+	if perPodDNS {
+		r.StatefulSet = statefulset.NewStatefulSetReconciler(client, scheme, componentMeta, componentExt, podSpec, componentMeta.Name)
+	} else {
+		r.Deployment = deployment.NewDeploymentReconciler(client, scheme, componentMeta, componentExt, podSpec)
+	}
+
+	return r, nil
 }
 
 func createRawURL(clientset kubernetes.Interface, metadata metav1.ObjectMeta) (*knapis.URL, error) {
@@ -78,6 +94,25 @@ func createRawURL(clientset kubernetes.Interface, metadata metav1.ObjectMeta) (*
 
 // Reconcile ...
 func (r *RawKubeReconciler) Reconcile() (*appsv1.Deployment, error) {
+	// In per-pod-DNS mode, reconcile a StatefulSet (with fixed replicas and no HPA/Scaler)
+	// instead of a Deployment. The deployment return value is nil in this mode; status is
+	// propagated from the StatefulSet by the common reconciler.
+	if r.StatefulSet != nil {
+		if _, err := r.StatefulSet.Reconcile(); err != nil {
+			return nil, err
+		}
+		// reconcile Service (headless in this mode)
+		if _, err := r.Service.Reconcile(); err != nil {
+			return nil, err
+		}
+		// reconcile PDB
+		if _, err := r.PodDisruptionBudget.Reconcile(); err != nil {
+			return nil, err
+		}
+		// Skip the HPA/Scaler: per-pod-DNS engines have fixed replicas and the Scaler targets a Deployment.
+		return nil, nil
+	}
+
 	// reconcile Deployments
 	dply, err := r.Deployment.Reconcile()
 	if err != nil {

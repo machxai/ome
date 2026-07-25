@@ -81,6 +81,27 @@ func (sr *StatusReconciler) isDeploymentRolloutComplete(deployment *appsv1.Deplo
 		deployment.Status.AvailableReplicas == desiredReplicas
 }
 
+// isStatefulSetReady reports whether a StatefulSet has fully rolled out its desired replicas.
+// StatefulSets do not expose an "Available" condition, so readiness is derived from the
+// ReadyReplicas/Replicas counts relative to the desired replica count.
+func (sr *StatusReconciler) isStatefulSetReady(statefulSet *appsv1.StatefulSet) bool {
+	if statefulSet == nil {
+		return false
+	}
+
+	desiredReplicas := statefulSet.Status.Replicas
+	if statefulSet.Spec.Replicas != nil {
+		desiredReplicas = *statefulSet.Spec.Replicas
+	}
+	if desiredReplicas == 0 {
+		return false
+	}
+
+	return statefulSet.Status.ObservedGeneration >= statefulSet.Generation &&
+		statefulSet.Status.ReadyReplicas == desiredReplicas &&
+		statefulSet.Status.Replicas == desiredReplicas
+}
+
 // getLWSConditions extracts condition from LeaderWorkerSet
 func (sr *StatusReconciler) getLWSConditions(lws *lwsspec.LeaderWorkerSet, conditionType lwsspec.LeaderWorkerSetConditionType) *apis.Condition {
 	condition := apis.Condition{}
