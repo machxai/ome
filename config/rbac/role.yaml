@@ -59,6 +59,7 @@ rules:
   resources:
   - controllerrevisions
   - deployments
+  - statefulsets
   verbs:
   - create
   - delete
